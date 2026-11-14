@@ -3,10 +3,36 @@
   "version": "0.1.0",
   "description": "資料庫結構地圖:從 Supabase/PostgREST 或 SQLite 產出「表名 + 欄位: 型別」文字清單、抽樣 json key 與狀態值、包成可搜尋的單頁網頁。零依賴 CLI,附資料設計守則。",
   "main": "index.js",
+  "bin": {
+    "schema-map": "cli.js"
+  },
+  "files": [
+    "index.js",
+    "cli.js",
+    "lib/",
+    "page.template.html",
+    "core-map.template.txt",
+    "README.md",
+    "SKILL.md",
+    "DESIGN-RULES.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "test": "node --test test/kit.test.js",
     "example": "node example.js"
   },
-  "keywords": [],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "database",
+    "schema",
+    "documentation",
+    "supabase",
+    "postgrest",
+    "sqlite",
+    "data-model"
+  ],
   "author": "Jeffrey0117",
   "license": "MIT"
 }

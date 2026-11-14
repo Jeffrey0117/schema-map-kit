@@ -1,0 +1,220 @@
+# 核心地圖(示範):一個多租戶線上課程平台
+#
+# 這是從一個真的在營運的系統改寫來的範例:拿掉了金流的表,名字與細節做過處理,
+# 但保留了它長到現在的樣子,包括幾個設計上的毛病(表底下 # 開頭的提醒就是在講這些)。
+# 對照 DESIGN-RULES.md 看每一條守則是從哪張表學到的。
+#
+# 讀法
+#   name?: type          ? = 可以是空的
+#   (-> 表.欄位)          指向另一張表
+#   { a | b | c }        資料裡實際出現過的值,不保證是全部合法值
+#   json 欄位底下縮排的    是裡面的 key
+#   fn()                 這件事的判斷寫在哪支程式,不要自己重寫一份
+
+
+==================================================
+一、分站(誰開的站、站長設定)
+==================================================
+
+tenants                                   # 一個分站 = 平台網址底下的 /{slug}
+- id: uuid  (PK)
+- slug: string                            # 網址那一段
+- owner_id: uuid  (-> profiles.id)        # 站長
+- name: string
+- is_active?: boolean
+- plan_tier?: string                      { free | pro }
+- enabled_features?: json                 # 功能開關都塞這裡,加 key 不用改資料表
+    business_type: courses | booking | both | shop      # 缺省 = courses
+    home_style: standard | community | catalog          # 缺省 = standard
+    online_payment_suspended                            # 被暫停線上刷卡
+- businessTypeOf()                        lib/business-type.ts
+- homeStyleOf()                           lib/home-style.ts
+# json 裡加 key 很方便,代價是資料庫不會告訴你裡面有什麼。所以每個 key 都要寫在這裡。(守則 7)
+
+site_settings                             # 每個分站一筆,站長在後台填的所有東西
+- id: uuid  (PK)
+- tenant_id?: uuid  (-> tenants.id)
+- site_name? / site_description? / logo_url? / og_image?: string
+- brand_color?: string
+- dark_mode: boolean
+- contact_email?: string
+- privacy_policy? / terms_of_service?: string
+- home_sections?: json[]                  # 首頁的版塊順序
+    type, order, enabled, config
+- announcement_bar? / promo_banner? / entry_popup?: json    # 行銷橫幅,每個都有 enabled
+- tracking_settings?: json
+    ga4_id, meta_pixel_id
+- bio_page_enabled? / bio_page_theme? / bio_page_layout? / bio_links? / bio_carousel? / bio_text_blocks?
+                                          # 個人連結頁的一整組
+# 這張表是雜物抽屜:真實的那份有 80 個欄位,其中 25 個是個人連結頁的。
+# 每加一個行銷橫幅就多一欄,每個頁面都把整筆 80 欄撈出來。(守則 1)
+# og_image 一欄三用:分享縮圖、首頁圖集的第一張、側邊圖的後備。改一個地方三處一起變。(守則 4)
+
+
+==================================================
+二、人
+==================================================
+
+profiles                                  # 一個帳號一筆
+- id: uuid  (PK)
+- full_name? / email? / avatar_url?: string
+- user_type?: string                      { student | creator | both }
+- is_blocked?: boolean
+# 「這個人是不是某分站的學員」沒有專門的表,是從 enrollments / product_purchases 推出來的。
+# 「分站的管理員成員」程式裡有在查,但資料庫裡沒有那張表 — 功能從來沒有真的存在過。(守則 6)
+
+
+==================================================
+三、課程內容
+==================================================
+
+courses                                   # 課程和文章共用這張表
+- id: uuid  (PK)
+- tenant_id?: uuid  (-> tenants.id)
+- short_id?: string                       # 網址用的短碼,資料庫沒有預設值,要自己生
+- content_type?: string                   { course | article }
+- title: string
+- category: string
+- thumbnail_url?: string
+- is_published?: boolean
+- original_price: int                     # 前台計價吃這個
+- sale_price?: int                        # 有值就蓋過 original_price
+- price?: number                          # 舊欄位,只填它前台會顯示「免費」
+- content?: string                        # 文章內文(課程用不到)
+- is_members_only?: boolean
+- seo_elements?: json
+    faq, toc, keyTakeaways
+- finalPrice()                            lib/pricing.ts
+# 文章是後來加的,為了省事塞進 courses。現在三分之二的資料其實是文章,
+# 課程用不到 content、文章用不到 sections,每支查詢都要記得加 content_type 的條件。(守則 2)
+# price 換成 original_price 之後舊欄位沒搬完也沒刪:三成的資料兩欄的值不一樣,
+# 沒人敢說哪個才對,五十幾個檔案還在讀舊的。(守則 5)
+
+sections                                  # 章
+- id: uuid  (PK)
+- course_id: uuid  (-> courses.id)
+- title: string
+- order_index: int
+
+lessons                                   # 單元(一支影片)
+- id: uuid  (PK)
+- course_id: uuid  (-> courses.id)
+- section_id?: uuid  (-> sections.id)
+- tenant_id?: uuid  (-> tenants.id)
+- title: string
+- order_index: int
+- video_url?: string
+- duration?: int
+- is_free_preview?: boolean
+# 結構:courses -> sections -> lessons
+# lessons 自己也帶 tenant_id,雖然從 course 查得到。多一欄,但查「這個分站的所有單元」
+# 與寫存取規則時不用繞路。(守則 8)
+
+lesson_progress                           # 誰看到哪
+- id: uuid  (PK)
+- user_id: uuid  (-> profiles.id)
+- lesson_id: uuid  (-> lessons.id)
+- completed?: boolean
+- position_seconds: int
+- last_watched_at?: datetime
+
+
+==================================================
+四、商品
+==================================================
+
+products                                  # 數位商品、實體商品、組合包
+- id: uuid  (PK)
+- tenant_id: uuid  (-> tenants.id)
+- short_id?: string
+- title: string
+- category: string
+- is_published?: boolean
+- original_price? / sale_price?: int
+- product_type?: string                   { single | bundle }
+- delivery_type?: string                  { digital | physical }
+- stock_quantity?: int
+- course_id?: uuid  (-> courses.id)       # 買了就開這堂課
+- shipping_options?: json[]
+    type, fee, enabled, description
+- variants?: json                         # 規格,例 [{ name: '尺寸', options: [...] }]
+
+discount_codes
+- id: uuid  (PK)
+- tenant_id: uuid  (-> tenants.id)
+- code: string
+- discount_type: string                   { fixed | percentage | final_price }
+- discount_value: int
+- is_active?: boolean
+- valid_until?: datetime
+- max_uses? / used_count?: int
+
+
+==================================================
+五、成交(誰買了什麼)
+==================================================
+
+enrollments                               # 課程的擁有紀錄:有這筆 = 看得到課
+- id: uuid  (PK)
+- user_id: uuid  (-> profiles.id)
+- course_id: uuid  (-> courses.id)
+- tenant_id?: uuid  (-> tenants.id)
+- status?: string                         { active | rejected | withdrawn }
+- payment_method?: string                 { online | credit | transfer | free | gift }
+- final_price?: int
+- discount_code_id?: uuid  (-> discount_codes.id)
+- billing_name? / billing_email?: string
+- enrolled_at? / expires_at?: datetime
+
+product_purchases                         # 商品的擁有紀錄
+- id: uuid  (PK)
+- user_id: uuid  (-> profiles.id)
+- product_id: uuid  (-> products.id)
+- tenant_id: uuid  (-> tenants.id)
+- status?: string                         { active | paid | reserved }
+- payment_method?: string                 { online | transfer | manual | free | gift }
+- final_price?: int
+- discount_code_id?: uuid  (-> discount_codes.id)
+- billing_name? / billing_email?: string
+- shipping_status?: string                { pending | shipped }
+- shipping_info?: json
+- purchased_at?: datetime
+# 這兩張表是同一件事(某人買了某樣東西)寫了兩次。欄位幾乎一樣,
+# 但「買成功」在一邊叫 active、另一邊可能是 active 也可能是 paid;
+# 付款方式一邊有 credit、另一邊有 manual。要算「這個人總共買了什麼」得兩邊各查一次再對齊。(守則 3)
+
+
+==================================================
+六、訂閱專區、社群、銷售頁
+==================================================
+
+club_posts                                # 訂閱專區:站長單向發文,訂閱者才看得到
+- id: uuid  (PK)
+- tenant_id: uuid  (-> tenants.id)
+- title: string
+- body: string
+- cover_image?: string
+- is_published / is_public / is_pinned: boolean
+- clubAccessOf()                          lib/club.ts   # 訂閱者 / 站長 / 單篇買斷,唯一判斷入口
+
+communities                               # 社群:課程討論區,和訂閱專區是兩回事
+- id: uuid  (PK)
+- tenant_id: uuid  (-> tenants.id)
+- name: string
+- slug?: string
+- is_active?: boolean
+- member_count?: int
+- settings?: json
+    require_approval, allow_member_post, allow_member_comment
+
+sales_pages                               # 銷售頁,賣一堂課或一個商品
+- id: uuid  (PK)
+- tenant_id: uuid  (-> tenants.id)
+- slug: string
+- title: string
+- status: string                          { draft | published }
+- linked_course_id?: uuid  (-> courses.id)
+- linked_product_id?: uuid  (-> products.id)
+- view_count?: int
+- content: json                           # 整頁內容,一個 key 一個區塊
+    hero, pain_points, solutions, testimonials, pricing, faqs, final_push

@@ -1,0 +1,13 @@
+{
+  "_schema": "kit-kit audit.js 的格式：{ id, rule, fix, pattern, files, severity }。pattern 與 files 都是 JS RegExp 字串（無 flags），pattern 逐行比對，files 比對專案內的相對路徑。audit 本身已排除 *.md / test/ / docs/ / example.js / kit-checks.json。",
+  "checks": [
+    {
+      "id": "hand-rolled-schema-outline",
+      "severity": "warn",
+      "pattern": "^(?!\\s*(?:\\*|//|/\\*|#)).*application/openapi\\+json",
+      "files": "^scripts/.*\\.(js|cjs|mjs|ts)$",
+      "rule": "專案的 scripts/ 裡自己去讀 PostgREST 的 OpenAPI 來列資料表。這就是 schema-map-kit 的 outline 在做的事;各專案各寫一份,格式會慢慢長歪,網頁版也吃不了。",
+      "fix": "刪掉那支腳本,package.json 改成 \"schema:outline\": \"npx -y github:Jeffrey0117/schema-map-kit outline\"。如果那支腳本讀 OpenAPI 是為了別的用途(例如產生型別),忽略本條。"
+    }
+  ]
+}
